@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAO Tensor Law Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f1117;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            background: #161822;
+            border-bottom: 1px solid #1e2030;
+        }
+        header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            color: #f1f5f9;
+        }
+        header h1 span { color: #64748b; font-weight: 400; font-size: 0.875rem; margin-left: 8px; }
+
+        .status-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 16px 32px;
+            padding: 12px 24px;
+            background: #1a1c2e;
+            border-bottom: 1px solid #1e2030;
+            font-size: 0.8125rem;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stat-label { color: #64748b; font-weight: 500; }
+        .stat-value { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #f1f5f9; }
+
+        .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 6px currentColor;
+        }
+        .dot-green { background: #22c55e; color: #22c55e; }
+        .dot-yellow { background: #eab308; color: #eab308; }
+        .dot-red { background: #ef4444; color: #ef4444; }
+        .dot-blue { background: #3b82f6; color: #3b82f6; }
+
+        .zone-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .zone-Bubble { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+        .zone-Expensive { background: rgba(234,179,8,0.15); color: #facc15; border: 1px solid rgba(234,179,8,0.3); }
+        .zone-Value { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+        .zone-Discount { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            padding: 16px;
+            min-height: 0;
+        }
+        #powerLawChart { width: 100% !important; height: 100% !important; }
+
+        .bottom-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 12px 24px;
+            padding: 12px 24px;
+            background: #161822;
+            border-top: 1px solid #1e2030;
+            font-size: 0.8125rem;
+        }
+
+        .cards-row {
+            display: flex;
+            gap: 16px;
+            padding: 0 24px 16px;
+            flex-wrap: wrap;
+        }
+        .card {
+            flex: 1;
+            min-width: 200px;
+            background: #161822;
+            border: 1px solid #1e2030;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .card h3 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+        .card-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 0.8125rem;
+        }
+        .card-row .label { color: #94a3b8; }
+        .card-row .value { font-family: 'JetBrains Mono', monospace; font-weight: 500; color: #e2e8f0; }
+
+        .band-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .band-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .loader-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15,17,23,0.9);
+            z-index: 30;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid #1e2030;
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loader-text {
+            margin-top: 12px;
+            font-size: 0.75rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .refresh-note {
+            text-align: center;
+            padding: 8px;
+            font-size: 0.6875rem;
+            color: #475569;
+        }
+
+        .offset-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .offset-input {
+            width: 70px;
+            background: #0f1117;
+            border: 1px solid #2d3148;
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8125rem;
+            padding: 4px 8px;
+            text-align: center;
+        }
+        .offset-input:focus { outline: none; border-color: #3b82f6; }
+        .btn-sm {
+            padding: 4px 12px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-sm:hover { background: #2563eb; }
+
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.8125rem;
+            color: #94a3b8;
+        }
+        .toggle-label input { display: none; }
+        .toggle-track {
+            width: 36px; height: 20px;
+            background: #2d3148;
+            border-radius: 10px;
+            position: relative;
+            transition: background 0.2s;
+        }
+        .toggle-label input:checked + .toggle-track { background: #3b82f6; }
+        .toggle-thumb {
+            width: 16px; height: 16px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px; left: 2px;
+            transition: transform 0.2s;
+        }
+        .toggle-label input:checked + .toggle-track .toggle-thumb { transform: translateX(16px); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>TAO Tensor Law <span>Bittensor Price Model</span></h1>
+        <div class="stat-item">
+            <span class="stat-label">Live Price</span>
+            <span id="livePrice" class="stat-value" style="font-size:1.125rem;">--</span>
+        </div>
+    </header>
+
+    <div class="status-bar">
+        <div class="stat-item">
+            <span id="statusDot" class="dot dot-green"></span>
+            <span id="dataStatus" class="stat-label">Loading...</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Last Price</span>
+            <span id="lastPrice" class="stat-value">--</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Zone</span>
+            <span id="priceZone" class="zone-badge">--</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">R²</span>
+            <span id="r2Value" class="stat-value">--</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Exponent (α)</span>
+            <span id="slopeValue" class="stat-value">--</span>
+        </div>
+        <div class="stat-item offset-control">
+            <span class="stat-label">Day Offset</span>
+            <input id="offsetInput" type="number" class="offset-input" value="486">
+            <button id="offsetBtn" class="btn-sm" onclick="reloadWithOffset()">Apply</button>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <div id="loader" class="loader-overlay">
+            <div class="spinner"></div>
+            <div class="loader-text">Initialising Model</div>
+        </div>
+        <canvas id="powerLawChart"></canvas>
+    </div>
+
+    <div class="bottom-bar">
+        <label class="toggle-label">
+            Show Bands
+            <input type="checkbox" id="showBands" onchange="toggleBands()">
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <div class="stat-item">
+            <span class="stat-label">Data Points</span>
+            <span id="dataPoints" class="stat-value">--</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Intercept</span>
+            <span id="interceptValue" class="stat-value">--</span>
+        </div>
+    </div>
+
+    <div class="cards-row">
+        <div class="card">
+            <h3>Fair Value Projections</h3>
+            <div id="projections"></div>
+        </div>
+        <div class="card">
+            <h3>Valuation Bands (Today)</h3>
+            <div id="bandLevels"></div>
+        </div>
+    </div>
+
+    <div class="refresh-note">Auto-refreshes every 5 minutes &middot; Data from taotensorlaw.com &middot; Price from Binance</div>
+
+<script>
+let chart = null;
+let modelData = null;
+
+async function fetchData() {
+    try {
+        const resp = await fetch('/api/data');
+        if (!resp.ok) throw new Error('API error');
+        return await resp.json();
+    } catch (e) {
+        console.error('Fetch error:', e);
+        return null;
+    }
+}
+
+async function fetchLivePrice() {
+    try {
+        const resp = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=TAOUSDT');
+        const data = await resp.json();
+        return parseFloat(data.price);
+    } catch (e) {
+        return null;
+    }
+}
+
+function updateLivePrice(price) {
+    const el = document.getElementById('livePrice');
+    if (price) {
+        el.textContent = '$' + price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        el.style.color = '#4ade80';
+    }
+}
+
+function updateUI(data) {
+    if (!data || data.error) {
+        document.getElementById('dataStatus').textContent = 'Error loading data';
+        document.getElementById('statusDot').className = 'dot dot-red';
+        document.getElementById('loader').style.display = 'none';
+        return;
+    }
+    modelData = data;
+
+    // Status
+    const lastDate = new Date(data.last_date);
+    document.getElementById('dataStatus').textContent = lastDate.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'});
+    const diffMs = Date.now() - lastDate.getTime();
+    if (diffMs < 51*3600*1000) {
+        document.getElementById('statusDot').className = 'dot dot-green';
+    } else if (diffMs < 7*86400*1000) {
+        document.getElementById('statusDot').className = 'dot dot-yellow';
+    } else {
+        document.getElementById('statusDot').className = 'dot dot-red';
+    }
+
+    // Prices
+    document.getElementById('lastPrice').textContent = '$' + data.last_price.toFixed(2);
+    if (data.live_price) updateLivePrice(data.live_price);
+
+    // Zone
+    const zoneEl = document.getElementById('priceZone');
+    zoneEl.textContent = data.zone;
+    zoneEl.className = 'zone-badge zone-' + data.zone;
+
+    // Model params
+    document.getElementById('r2Value').textContent = data.r2.toFixed(4);
+    document.getElementById('slopeValue').textContent = data.slope.toFixed(4);
+    document.getElementById('interceptValue').textContent = data.intercept.toFixed(4);
+    document.getElementById('dataPoints').textContent = data.data_points;
+    document.getElementById('offsetInput').value = data.day_offset;
+
+    // Projections
+    const projEl = document.getElementById('projections');
+    projEl.innerHTML = data.projections.map(p =>
+        `<div class="card-row"><span class="label">${p.label}</span><span class="value">$${p.price ? p.price.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : 'N/A'}</span></div>`
+    ).join('');
+
+    // Bands
+    const bands = data.bands;
+    const bandEl = document.getElementById('bandLevels');
+    const bandItems = [
+        {name: 'Bubble', color: '#f87171', range: bands.bubble},
+        {name: 'Expensive', color: '#facc15', range: bands.expensive},
+        {name: 'Value', color: '#4ade80', range: bands.value},
+        {name: 'Discount', color: '#60a5fa', range: bands.discount},
+    ];
+    bandEl.innerHTML = bandItems.map(b =>
+        `<div class="card-row">
+            <span class="label band-label"><span class="band-dot" style="background:${b.color}"></span>${b.name}</span>
+            <span class="value">$${b.range[0].toFixed(2)} – $${b.range[1].toFixed(2)}</span>
+        </div>`
+    ).join('');
+
+    buildChart(data);
+    document.getElementById('loader').style.display = 'none';
+}
+
+function buildChart(data) {
+    const ctx = document.getElementById('powerLawChart').getContext('2d');
+
+    // Price data points: transform to {x: timestamp_ms, y: price}
+    const pricePoints = data.price_history.map(p => ({x: p[0] * 1000, y: p[1]}));
+
+    // Trend lines
+    const medianLine = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.median}));
+    const p1Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p1}));
+    const p99Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p99}));
+    const p20Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p20}));
+    const p80Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p80}));
+
+    const showBands = document.getElementById('showBands').checked;
+
+    const datasets = [
+        // Band fills (hidden by default)
+        {label: '_p1_boundary', data: p1Line, borderColor: 'transparent', backgroundColor: 'transparent', fill: false, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_discount_fill', data: p20Line, borderColor: 'transparent', backgroundColor: 'rgba(96,165,250,0.12)', fill: 0, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_value_fill', data: medianLine, borderColor: 'transparent', backgroundColor: 'rgba(74,222,128,0.12)', fill: 1, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_expensive_fill', data: p80Line, borderColor: 'transparent', backgroundColor: 'rgba(250,204,21,0.12)', fill: 2, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_bubble_fill', data: p99Line, borderColor: 'transparent', backgroundColor: 'rgba(248,113,113,0.12)', fill: 3, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+
+        // Price line
+        {
+            label: 'Price',
+            data: pricePoints,
+            borderColor: '#e2e8f0',
+            backgroundColor: 'rgba(226,232,240,0.05)',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHitRadius: 10,
+            tension: 0.1,
+            fill: false,
+        },
+        // Median (fair value)
+        {
+            label: '50th Pctl (Fair Value)',
+            data: medianLine,
+            borderColor: '#f97316',
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: false,
+            borderDash: [],
+        },
+        // P1
+        {
+            label: '1st Pctl',
+            data: p1Line,
+            borderColor: 'rgba(148,163,184,0.7)',
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: false,
+            borderDash: [4, 4],
+        },
+        // P99
+        {
+            label: '99th Pctl',
+            data: p99Line,
+            borderColor: 'rgba(148,163,184,0.7)',
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: false,
+            borderDash: [4, 4],
+        },
+        // P20
+        {
+            label: '20th Pctl',
+            data: p20Line,
+            borderColor: 'rgba(148,163,184,0.5)',
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: false,
+            borderDash: [4, 4],
+            hidden: !showBands,
+        },
+        // P80
+        {
+            label: '80th Pctl',
+            data: p80Line,
+            borderColor: 'rgba(148,163,184,0.5)',
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: false,
+            borderDash: [4, 4],
+            hidden: !showBands,
+        },
+    ];
+
+    const config = {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    labels: {
+                        color: '#94a3b8',
+                        usePointStyle: true,
+                        boxWidth: 20,
+                        font: { family: "'Inter', sans-serif", size: 11 },
+                        filter: (item) => !item.text.startsWith('_'),
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15,23,42,0.95)',
+                    titleColor: '#f8fafc',
+                    bodyColor: '#f8fafc',
+                    titleFont: { family: "'Inter', sans-serif", weight: 600 },
+                    bodyFont: { family: "'JetBrains Mono', monospace" },
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    borderWidth: 1,
+                    padding: 10,
+                    displayColors: false,
+                    filter: (item) => !item.dataset.label.startsWith('_'),
+                    callbacks: {
+                        title: (items) => {
+                            if (items.length > 0) {
+                                const d = new Date(items[0].parsed.x);
+                                return d.toLocaleDateString(undefined, {year:'numeric', month:'long', day:'numeric'});
+                            }
+                            return '';
+                        },
+                        label: (ctx) => {
+                            if (ctx.dataset.label.startsWith('_')) return null;
+                            return ctx.dataset.label + ': $' + ctx.parsed.y.toFixed(2);
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: { unit: 'year', displayFormats: { year: 'yyyy' } },
+                    ticks: { color: '#64748b', font: { family: "'Inter', sans-serif", size: 10 } },
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    title: { display: true, text: 'Time', color: '#64748b', font: { size: 11, family: 'Inter' } },
+                },
+                y: {
+                    type: 'logarithmic',
+                    ticks: {
+                        color: '#64748b',
+                        font: { family: "'Inter', sans-serif", size: 10 },
+                        callback: function(value) {
+                            const logVal = Math.log10(value);
+                            if (Math.abs(logVal - Math.round(logVal)) < 1e-9) {
+                                return '$' + value.toLocaleString();
+                            }
+                            return '';
+                        }
+                    },
+                    grid: {
+                        color: function(ctx) {
+                            const val = ctx.tick.value;
+                            if (val <= 0) return 'rgba(255,255,255,0.04)';
+                            const logVal = Math.log10(val);
+                            if (Math.abs(logVal - Math.round(logVal)) < 1e-9) return 'rgba(255,255,255,0.08)';
+                            return 'rgba(255,255,255,0.02)';
+                        }
+                    },
+                    title: { display: true, text: 'Price (Log Scale)', color: '#64748b', font: { size: 11, family: 'Inter' } },
+                }
+            }
+        }
+    };
+
+    if (chart) {
+        chart.destroy();
+    }
+    chart = new Chart(ctx, config);
+}
+
+function toggleBands() {
+    if (!chart || !modelData) return;
+    const show = document.getElementById('showBands').checked;
+    // Fills (0-4)
+    for (let i = 0; i <= 4; i++) {
+        chart.setDatasetVisibility(i, show);
+    }
+    // P20/P80 lines (9, 10)
+    chart.setDatasetVisibility(9, show);
+    chart.setDatasetVisibility(10, show);
+    chart.update();
+}
+
+function reloadWithOffset() {
+    const offset = parseInt(document.getElementById('offsetInput').value);
+    if (isNaN(offset)) return;
+    document.getElementById('loader').style.display = 'flex';
+    fetch('/api/data?offset=' + offset)
+        .then(r => r.json())
+        .then(data => updateUI(data))
+        .catch(e => {
+            console.error(e);
+            document.getElementById('loader').style.display = 'none';
+        });
+}
+
+async function init() {
+    const data = await fetchData();
+    updateUI(data);
+
+    // Update live price every 30 seconds
+    setInterval(async () => {
+        const p = await fetchLivePrice();
+        if (p) updateLivePrice(p);
+    }, 30000);
+
+    // Full refresh every 5 minutes
+    setInterval(async () => {
+        const data = await fetchData();
+        if (data && !data.error) updateUI(data);
+    }, 300000);
+}
+
+init();
+</script>
+</body>
+</html>
