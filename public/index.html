@@ -307,7 +307,7 @@
         </div>
     </div>
 
-    <div class="refresh-note">Auto-refreshes every 5 minutes &middot; Data from taotensorlaw.com &middot; Price from Binance</div>
+    <div class="refresh-note">Auto-refreshes every 1 hour &middot; Data from taotensorlaw.com &middot; Price from Binance</div>
 
 <script>
 // ============================================================
@@ -879,13 +879,13 @@ async function init() {
         document.getElementById('loader').style.display = 'none';
     }
 
-    // Update live price every 30 seconds
+    // Update live price every 15 minutes
     setInterval(async () => {
         const p = await fetchLivePrice();
         if (p) updateLivePrice(p);
-    }, 30000);
+    }, 900000);
 
-    // Full refresh every 5 minutes
+    // Full refresh every 1 hour
     setInterval(async () => {
         try {
             const raw = await loadRawData();
@@ -897,7 +897,7 @@ async function init() {
         } catch (e) {
             console.error('Refresh error:', e);
         }
-    }, 300000);
+    }, 3600000);
 }
 
 init();
