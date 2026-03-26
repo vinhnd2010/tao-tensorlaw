@@ -762,11 +762,30 @@ function buildChart(data) {
                     borderWidth: 1,
                     padding: 10,
                     displayColors: false,
-                    filter: (item) => !item.dataset.label.startsWith('_'),
+                    filter: (item) => {
+                        if (item.dataset.label.startsWith('_')) return false;
+                        // For the Price dataset, only show tooltip if we're near actual price data
+                        // (prevent snapping to old price points when hovering over future area)
+                        if (item.dataset.label === 'Price') {
+                            const chart = item.chart;
+                            const xMs = item.parsed.x;
+                            const priceData = item.dataset.data;
+                            if (priceData && priceData.length > 0) {
+                                const lastPriceTs = priceData[priceData.length - 1].x;
+                                // Only show price tooltip if within 30 days of last price point
+                                if (xMs > lastPriceTs + 30 * 86400000) return false;
+                            }
+                        }
+                        return true;
+                    },
                     callbacks: {
                         title: (items) => {
                             if (items.length > 0) {
-                                const d = new Date(items[0].parsed.x);
+                                // Prefer the x value from a trend/projection dataset if available
+                                // (more accurate for future dates)
+                                const trendItem = items.find(i => i.dataset.label !== 'Price');
+                                const xMs = trendItem ? trendItem.parsed.x : items[0].parsed.x;
+                                const d = new Date(xMs);
                                 return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
                             }
                             return '';
