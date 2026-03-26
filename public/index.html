@@ -317,6 +317,7 @@
 
 const OFFSET_NAKAMOTO = 486;
 let chart = null;
+let lastPriceTimestamp = 0; // Track last actual price timestamp globally
 let modelData = null;
 let cachedRawData = null;
 
@@ -658,6 +659,8 @@ function buildChart(data) {
     const ctx = document.getElementById('powerLawChart').getContext('2d');
 
     const pricePoints = data.price_history.map(p => ({ x: p[0] * 1000, y: p[1] }));
+    // Store last price timestamp globally for tooltip filter
+    lastPriceTimestamp = pricePoints.length > 0 ? pricePoints[pricePoints.length - 1].x : 0;
 
     const medianLine = data.trend_line.map(p => ({ x: p.timestamp * 1000, y: p.median }));
     const p1Line = data.trend_line.map(p => ({ x: p.timestamp * 1000, y: p.p1 }));
@@ -764,17 +767,10 @@ function buildChart(data) {
                     displayColors: false,
                     filter: (item) => {
                         if (item.dataset.label.startsWith('_')) return false;
-                        // For the Price dataset, only show tooltip if we're near actual price data
-                        // (prevent snapping to old price points when hovering over future area)
-                        if (item.dataset.label === 'Price') {
-                            const chart = item.chart;
+                        // Hide Price line tooltip when hovering over future area
+                        if (item.dataset.label === 'Price' && lastPriceTimestamp > 0) {
                             const xMs = item.parsed.x;
-                            const priceData = item.dataset.data;
-                            if (priceData && priceData.length > 0) {
-                                const lastPriceTs = priceData[priceData.length - 1].x;
-                                // Only show price tooltip if within 30 days of last price point
-                                if (xMs > lastPriceTs + 30 * 86400000) return false;
-                            }
+                            if (xMs > lastPriceTimestamp + 7 * 86400000) return false;
                         }
                         return true;
                     },
