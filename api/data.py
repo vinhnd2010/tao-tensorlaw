@@ -25,7 +25,7 @@ def add_cors_headers(response):
 
 @app.route("/api/data")
 def api_data():
-    raw = fetch_from_upstream()
+    raw = fetch_from_upstream(timeout=5)
     if not raw:
         return jsonify({"error": "No data available"}), 500
 
@@ -37,14 +37,14 @@ def api_data():
 
     if today > last_day:
         start_ms = (last_ts + 86400) * 1000
-        klines = fetch_binance_daily_klines(start_ms)
+        klines = fetch_binance_daily_klines(start_ms, timeout=3)
         if klines:
             for k in klines:
                 if k[0] > last_ts + 43200:
                     raw.append(k)
 
     # Update today's price with latest from Binance
-    live_price = fetch_binance_price()
+    live_price = fetch_binance_price(timeout=3)
     if live_price:
         gap_fill_and_update(raw, live_price)
 

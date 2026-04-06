@@ -5,12 +5,12 @@ from datetime import datetime
 import requests
 
 
-def fetch_from_upstream():
+def fetch_from_upstream(timeout=30):
     """Fetch full price history from taotensorlaw.com."""
     try:
         resp = requests.get(
             "https://taotensorlaw.com/price_data.json",
-            timeout=30,
+            timeout=timeout,
             headers={"User-Agent": "TAO-TensorLaw-Dashboard/1.0"},
         )
         resp.raise_for_status()
@@ -20,13 +20,13 @@ def fetch_from_upstream():
         return []
 
 
-def fetch_binance_price():
+def fetch_binance_price(timeout=5):
     """Get current TAO/USDT spot price from Binance."""
     try:
         resp = requests.get(
             "https://api.binance.com/api/v3/ticker/price",
             params={"symbol": "TAOUSDT"},
-            timeout=10,
+            timeout=timeout,
         )
         resp.raise_for_status()
         return float(resp.json()["price"])
@@ -35,7 +35,7 @@ def fetch_binance_price():
         return None
 
 
-def fetch_binance_daily_klines(start_ts_ms):
+def fetch_binance_daily_klines(start_ts_ms, timeout=5):
     """Fetch daily klines from Binance starting at given timestamp (ms).
     Returns [[timestamp_seconds, close_price], ...]
     """
@@ -48,7 +48,7 @@ def fetch_binance_daily_klines(start_ts_ms):
                 "startTime": int(start_ts_ms),
                 "limit": 1000,
             },
-            timeout=15,
+            timeout=timeout,
         )
         resp.raise_for_status()
         klines = resp.json()
