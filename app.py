@@ -343,6 +343,18 @@ def api_data():
                 if k[0] > last_ts + 43200:  # at least 12h after last point
                     raw.append(k)
 
+    # Sort by timestamp and deduplicate
+    raw.sort(key=lambda x: x[0])
+    seen = set()
+    deduped = []
+    for point in raw:
+        ts = point[0]
+        day_key = int(ts // 86400)  # bucket by day
+        if day_key not in seen:
+            seen.add(day_key)
+            deduped.append(point)
+    raw = deduped
+
     # Support custom day offset via query param
     offset = request.args.get("offset", OFFSET_NAKAMOTO, type=int)
 
