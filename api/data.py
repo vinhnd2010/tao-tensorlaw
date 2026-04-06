@@ -32,9 +32,10 @@ def api_data():
     # Gap-fill missing days from Binance
     last_ts = raw[-1][0]
     now_ts = time.time()
-    gap_days = (now_ts - last_ts) / 86400
+    last_day = int(last_ts // 86400)
+    today = int(now_ts // 86400)
 
-    if gap_days > 1:
+    if today > last_day:
         start_ms = (last_ts + 86400) * 1000
         klines = fetch_binance_daily_klines(start_ms)
         if klines:

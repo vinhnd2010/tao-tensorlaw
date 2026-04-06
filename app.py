@@ -44,9 +44,10 @@ def append_binance_data(data):
         return data  # too soon, skip
 
     last_ts = data[-1][0]
-    gap_days = (now - last_ts) / 86400
-    if gap_days < 1:
-        return data  # nothing new yet
+    last_day = int(last_ts // 86400)
+    today = int(now // 86400)
+    if today <= last_day:
+        return data  # already have today's data
 
     start_ms = (last_ts + 86400) * 1000
     klines = fetch_binance_daily_klines(start_ms)
