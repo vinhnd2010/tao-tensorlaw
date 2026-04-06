@@ -15,11 +15,13 @@ from flask import Flask, jsonify, render_template, request
 app = Flask(__name__, template_folder=".")
 
 DATA_DIR = Path(__file__).parent
-CACHE_FILE = DATA_DIR / "price_data.json"        # self-hosted enriched data
-UPSTREAM_FILE = DATA_DIR / "price_data_upstream.json"  # raw from taotensorlaw.com
-CACHE_MAX_AGE = 86400  # 24 hours — re-enrich once per day
+CACHE_FILE = DATA_DIR / "price_data.json"  # self-hosted, append-only after bootstrap
+APPEND_INTERVAL = 3600  # append new Binance data every 1 hour
 
 OFFSET_NAKAMOTO = 486
+
+# In-memory timestamp of last Binance append (avoid hammering API)
+_last_append_time = 0
 
 
 def _sort_dedupe(data):
@@ -35,8 +37,10 @@ def _sort_dedupe(data):
     return out
 
 
-def _fetch_upstream():
-    """Fetch historical data from taotensorlaw.com and cache it."""
+def bootstrap_from_upstream():
+    """One-time bootstrap: fetch full history from taotensorlaw.com.
+    Only called when price_data.json does not exist yet."""
+    print(f"[{datetime.now()}] Bootstrapping from taotensorlaw.com ...")
     try:
         resp = requests.get(
             "https://taotensorlaw.com/price_data.json",
@@ -45,56 +49,66 @@ def _fetch_upstream():
         )
         resp.raise_for_status()
         data = resp.json()
-        UPSTREAM_FILE.write_text(json.dumps(data))
-        print(f"[{datetime.now()}] Fetched upstream price_data.json ({len(data)} points)")
+        data = _sort_dedupe(data)
+        CACHE_FILE.write_text(json.dumps(data))
+        print(f"[{datetime.now()}] Bootstrap done: {len(data)} points saved.")
         return data
     except Exception as e:
-        print(f"[{datetime.now()}] Failed to fetch upstream: {e}")
-        if UPSTREAM_FILE.exists():
-            return json.loads(UPSTREAM_FILE.read_text())
+        print(f"[{datetime.now()}] Bootstrap failed: {e}")
         return []
 
 
-def build_enriched_data():
-    """Combine upstream historical data with latest Binance daily klines,
-    then save the enriched result to price_data.json (self-hosted)."""
-    base = _fetch_upstream()
-    if not base:
-        return []
+def append_binance_data(data):
+    """Append any new daily klines from Binance since last data point.
+    Mutates and saves data in place. Returns updated data."""
+    global _last_append_time
+    now = time.time()
+    if now - _last_append_time < APPEND_INTERVAL:
+        return data  # too soon, skip
 
-    base = _sort_dedupe(base)
+    last_ts = data[-1][0]
+    gap_days = (now - last_ts) / 86400
+    if gap_days < 1:
+        return data  # nothing new yet
 
-    # Append Binance klines from day after last upstream point up to today
-    last_ts = base[-1][0]
     start_ms = (last_ts + 86400) * 1000
     klines = fetch_binance_daily_klines(start_ms)
     if klines:
+        added = 0
         for k in klines:
             if k[0] > last_ts + 43200:  # at least 12h gap
-                base.append(k)
-        base = _sort_dedupe(base)
+                data.append(k)
+                added += 1
+        if added:
+            data = _sort_dedupe(data)
+            CACHE_FILE.write_text(json.dumps(data))
+            print(f"[{datetime.now()}] Appended {added} new Binance points. Total: {len(data)}")
 
-    CACHE_FILE.write_text(json.dumps(base))
-    print(f"[{datetime.now()}] Saved enriched price_data.json ({len(base)} points)")
-    return base
+    _last_append_time = now
+    return data
 
 
 def fetch_price_data():
-    """Return enriched price data, rebuilding from upstream+Binance if stale."""
-    needs_rebuild = True
-    if CACHE_FILE.exists():
-        age = time.time() - CACHE_FILE.stat().st_mtime
-        if age < CACHE_MAX_AGE:
-            needs_rebuild = False
+    """Load local price_data.json, bootstrapping from upstream if it doesn't exist yet.
+    Then append any new Binance data since the last stored point."""
+    if not CACHE_FILE.exists():
+        data = bootstrap_from_upstream()
+    else:
+        data = json.loads(CACHE_FILE.read_text())
 
-    if needs_rebuild:
-        data = build_enriched_data()
-        if data:
-            return data
+    if not data:
+        return []
 
-    if CACHE_FILE.exists():
-        return json.loads(CACHE_FILE.read_text())
-    return []
+    # Append latest Binance data (throttled to once per hour)
+    data = append_binance_data(data)
+    return data
+
+
+def build_enriched_data():
+    """Alias kept for /api/refresh endpoint — forces a Binance append."""
+    global _last_append_time
+    _last_append_time = 0  # reset throttle
+    return fetch_price_data()
 
 
 def fetch_binance_price():
@@ -375,13 +389,13 @@ def compute_model(raw_data, day_offset=OFFSET_NAKAMOTO):
 
 
 def refresh_data_periodically():
-    """Background thread: rebuild enriched data every 24h."""
+    """Background thread: append new Binance data every hour."""
     while True:
-        time.sleep(CACHE_MAX_AGE)
+        time.sleep(APPEND_INTERVAL)
         try:
-            build_enriched_data()
+            fetch_price_data()
         except Exception as e:
-            print(f"Background refresh error: {e}")
+            print(f"Background append error: {e}")
 
 
 @app.route("/")
@@ -422,8 +436,8 @@ if __name__ == "__main__":
     t = threading.Thread(target=refresh_data_periodically, daemon=True)
     t.start()
 
-    # Initial data build
-    build_enriched_data()
+    # Bootstrap or load existing data on startup
+    fetch_price_data()
 
     print("Starting TAO Tensor Law Dashboard on http://localhost:8086")
     port = int(os.environ.get("PORT", 8086))
