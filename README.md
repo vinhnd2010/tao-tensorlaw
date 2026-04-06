@@ -34,8 +34,6 @@ tao-tensorlaw/
 │   └── index.html         # Single frontend (used by both Flask and Vercel)
 │                          #   - Client-side Binance gap-fill for stale data
 │                          #   - Live price updates from Binance
-├── gh-pages/
-│   └── index.html         # GitHub Pages static version (standalone)
 ├── price_data.json        # Local cache of enriched price data
 ├── requirements.txt       # Python dependencies (Flask, requests, gunicorn)
 ├── Procfile               # Heroku deployment config
