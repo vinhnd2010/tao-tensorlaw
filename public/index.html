@@ -437,38 +437,12 @@ async function fetchLivePrice() {
 }
 
 async function loadRawData() {
+    // price_data.json is already enriched server-side (historical + Binance appended)
+    // Just read it directly — no need to fetch Binance again
     const raw = await fetchHistoricalData();
     if (!raw || raw.length === 0) throw new Error('No historical data');
-
-    // Fill gap with Binance klines
-    const lastTs = raw[raw.length - 1][0];
-    const nowTs = Date.now() / 1000;
-    const gapDays = (nowTs - lastTs) / 86400;
-
-    if (gapDays > 1) {
-        const startMs = (lastTs + 86400) * 1000;
-        const klines = await fetchBinanceDailyKlines(startMs);
-        for (const k of klines) {
-            if (k[0] > lastTs + 43200) { // at least 12h after last point
-                raw.push(k);
-            }
-        }
-    }
-
-    // Sort by timestamp and deduplicate by day bucket
-    raw.sort((a, b) => a[0] - b[0]);
-    const seen = new Set();
-    const deduped = [];
-    for (const p of raw) {
-        const dayKey = Math.floor(p[0] / 86400);
-        if (!seen.has(dayKey)) {
-            seen.add(dayKey);
-            deduped.push(p);
-        }
-    }
-
-    cachedRawData = deduped;
-    return deduped;
+    cachedRawData = raw;
+    return raw;
 }
 
 // ---- Power Law Math (ported from app.py) ----
