@@ -259,37 +259,54 @@ def compute_model(raw_data, day_offset=OFFSET_NAKAMOTO):
         else:
             projections.append({"label": label, "price": None})
 
-    # Trend line data for chart (extend 365 days forward)
-    last_day = base[-1]["dayIndex"]
-    future_day = last_day + 365
+    # Trend line data for chart — aligned to price history timestamps + 365 days future
+    # Use same timestamps as price data so tooltip mode:'index' always shows all datasets
     trend_line = []
-    # Generate 200 points from first to future
-    first_x = base[0]["dayIndex"] + day_offset
-    last_x_extended = future_day + day_offset
-    if first_x > 0 and last_x_extended > first_x:
-        log_min = math.log10(first_x)
-        log_max = math.log10(last_x_extended)
-        steps = 200
-        for i in range(steps + 1):
-            log_x = log_min + (log_max - log_min) * i / steps
-            x_val = 10 ** log_x
-            day_idx = x_val - day_offset
-            ts_ms = base[0]["time"] + (day_idx - base[0]["dayIndex"]) * ms_per_day
-            # Median (fair value) trend
-            y_median = 10 ** (slope * log_x + median_intercept)
-            # P1 and P99 bounds
-            y_p1 = 10 ** (slope * log_x + intercept + p1)
-            y_p99 = 10 ** (slope * log_x + intercept + p99)
-            y_p20 = 10 ** (slope * log_x + intercept + p20)
-            y_p80 = 10 ** (slope * log_x + intercept + p80)
-            trend_line.append({
-                "timestamp": ts_ms / 1000,
-                "median": round(y_median, 4),
-                "p1": round(y_p1, 4),
-                "p99": round(y_p99, 4),
-                "p20": round(y_p20, 4),
-                "p80": round(y_p80, 4),
-            })
+    last_day = base[-1]["dayIndex"]
+    last_ts_ms = base[-1]["time"]
+
+    # Build from actual price history points
+    for p in base:
+        day_idx = p["dayIndex"]
+        x_val = day_idx + day_offset
+        if x_val <= 0:
+            continue
+        log_x = math.log10(x_val)
+        y_median = 10 ** (slope * log_x + median_intercept)
+        y_p1 = 10 ** (slope * log_x + intercept + p1)
+        y_p99 = 10 ** (slope * log_x + intercept + p99)
+        y_p20 = 10 ** (slope * log_x + intercept + p20)
+        y_p80 = 10 ** (slope * log_x + intercept + p80)
+        trend_line.append({
+            "timestamp": p["time"] / 1000,
+            "median": round(y_median, 4),
+            "p1": round(y_p1, 4),
+            "p99": round(y_p99, 4),
+            "p20": round(y_p20, 4),
+            "p80": round(y_p80, 4),
+        })
+
+    # Extend 365 days into the future (monthly points)
+    for extra_days in range(30, 366, 30):
+        day_idx = last_day + extra_days
+        x_val = day_idx + day_offset
+        if x_val <= 0:
+            continue
+        log_x = math.log10(x_val)
+        ts_ms = last_ts_ms + extra_days * ms_per_day
+        y_median = 10 ** (slope * log_x + median_intercept)
+        y_p1 = 10 ** (slope * log_x + intercept + p1)
+        y_p99 = 10 ** (slope * log_x + intercept + p99)
+        y_p20 = 10 ** (slope * log_x + intercept + p20)
+        y_p80 = 10 ** (slope * log_x + intercept + p80)
+        trend_line.append({
+            "timestamp": ts_ms / 1000,
+            "median": round(y_median, 4),
+            "p1": round(y_p1, 4),
+            "p99": round(y_p99, 4),
+            "p20": round(y_p20, 4),
+            "p80": round(y_p80, 4),
+        })
 
     return {
         "slope": round(slope, 6),
