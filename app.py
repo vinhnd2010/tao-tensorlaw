@@ -12,7 +12,7 @@ from pathlib import Path
 import requests
 from flask import Flask, jsonify, render_template, request
 
-app = Flask(__name__, template_folder=".")
+app = Flask(__name__, template_folder="public")
 
 DATA_DIR = Path(__file__).parent
 CACHE_FILE = DATA_DIR / "price_data.json"  # self-hosted, append-only after bootstrap
@@ -400,7 +400,7 @@ def refresh_data_periodically():
 
 @app.route("/")
 def index():
-    return render_template("dashboard.html")
+    return render_template("index.html")
 
 
 @app.route("/api/data")

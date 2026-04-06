@@ -311,5 +311,6 @@ def api_data():
 
     live_price = fetch_binance_price()
     model["live_price"] = live_price
+    model["last_ts"] = raw[-1][0]
 
     return jsonify(model)

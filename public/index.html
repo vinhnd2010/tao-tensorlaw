@@ -91,69 +91,6 @@
         }
         #powerLawChart { width: 100% !important; height: 100% !important; }
 
-        /* Overlay panel buttons */
-        .chart-overlay-btns {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            display: flex;
-            gap: 6px;
-            z-index: 10;
-        }
-        .overlay-btn {
-            padding: 4px 10px;
-            background: rgba(30,41,59,0.85);
-            color: #94a3b8;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 6px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            cursor: pointer;
-            backdrop-filter: blur(4px);
-            transition: all 0.15s;
-            white-space: nowrap;
-        }
-        .overlay-btn:hover, .overlay-btn.active {
-            background: rgba(59,130,246,0.85);
-            color: white;
-            border-color: rgba(59,130,246,0.5);
-        }
-        /* Overlay panel */
-        .chart-overlay-panel {
-            position: absolute;
-            top: 50px;
-            right: 20px;
-            background: rgba(15,23,42,0.92);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 10px;
-            padding: 12px 14px;
-            min-width: 220px;
-            z-index: 20;
-            backdrop-filter: blur(8px);
-            display: none;
-        }
-        .chart-overlay-panel.visible { display: block; }
-        .chart-overlay-panel h4 {
-            color: #f1f5f9;
-            font-size: 0.75rem;
-            font-weight: 600;
-            margin: 0 0 8px 0;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        .chart-overlay-panel .card-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 4px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            gap: 12px;
-        }
-        .chart-overlay-panel .card-row:last-child { border-bottom: none; }
-        .chart-overlay-panel .label { color: #94a3b8; font-size: 0.75rem; }
-        .chart-overlay-panel .value { color: #f1f5f9; font-size: 0.75rem; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
-        .chart-overlay-panel .band-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
-
         .bottom-bar {
             display: flex;
             flex-wrap: wrap;
@@ -321,17 +258,17 @@
             <span id="priceZone" class="zone-badge">--</span>
         </div>
         <div class="stat-item">
-            <span class="stat-label">R&sup2;</span>
+            <span class="stat-label">R²</span>
             <span id="r2Value" class="stat-value">--</span>
         </div>
         <div class="stat-item">
-            <span class="stat-label">Exponent (&alpha;)</span>
+            <span class="stat-label">Exponent (α)</span>
             <span id="slopeValue" class="stat-value">--</span>
         </div>
         <div class="stat-item offset-control">
             <span class="stat-label">Day Offset</span>
             <input id="offsetInput" type="number" class="offset-input" value="486">
-            <button id="offsetBtn" class="btn-sm" onclick="applyOffset()">Apply</button>
+            <button id="offsetBtn" class="btn-sm" onclick="reloadWithOffset()">Apply</button>
         </div>
     </div>
 
@@ -341,24 +278,6 @@
             <div class="loader-text">Initialising Model</div>
         </div>
         <canvas id="powerLawChart"></canvas>
-
-        <!-- Overlay toggle buttons -->
-        <div class="chart-overlay-btns">
-            <button class="overlay-btn" id="btnProjections" onclick="toggleOverlay('projections-panel', 'btnProjections')">📅 Projections</button>
-            <button class="overlay-btn" id="btnBands" onclick="toggleOverlay('bands-panel', 'btnBands')">📊 Bands</button>
-        </div>
-
-        <!-- Projections overlay -->
-        <div class="chart-overlay-panel" id="projections-panel">
-            <h4>Fair Value Projections</h4>
-            <div id="projections"></div>
-        </div>
-
-        <!-- Bands overlay -->
-        <div class="chart-overlay-panel" id="bands-panel" style="top: 50px; right: 130px;">
-            <h4>Valuation Bands (Today)</h4>
-            <div id="bandLevels"></div>
-        </div>
     </div>
 
     <div class="bottom-bar">
@@ -377,52 +296,31 @@
         </div>
     </div>
 
-    <div class="refresh-note">Auto-refreshes every 1 hour &middot; Data from taotensorlaw.com &middot; Price from Binance</div>
+    <div class="cards-row">
+        <div class="card">
+            <h3>Fair Value Projections</h3>
+            <div id="projections"></div>
+        </div>
+        <div class="card">
+            <h3>Valuation Bands (Today)</h3>
+            <div id="bandLevels"></div>
+        </div>
+    </div>
+
+    <div class="refresh-note">Auto-refreshes every 5 minutes &middot; Data from taotensorlaw.com &middot; Price from Binance</div>
 
 <script>
-// ============================================================
-// TAO Tensor Law - Static Dashboard (all logic in browser)
-// Ported from app.py Python backend to vanilla JS
-// ============================================================
-
-const OFFSET_NAKAMOTO = 486;
 let chart = null;
-
-function toggleOverlay(panelId, btnId) {
-    const panel = document.getElementById(panelId);
-    const btn = document.getElementById(btnId);
-    const isVisible = panel.classList.contains('visible');
-    // Close all panels first
-    document.querySelectorAll('.chart-overlay-panel').forEach(p => p.classList.remove('visible'));
-    document.querySelectorAll('.overlay-btn').forEach(b => b.classList.remove('active'));
-    // Toggle clicked
-    if (!isVisible) {
-        panel.classList.add('visible');
-        btn.classList.add('active');
-    }
-}
-let lastPriceTimestamp = 0; // Track last actual price timestamp globally
 let modelData = null;
-let cachedRawData = null;
 
-// ---- Data Fetching ----
-
-async function fetchHistoricalData() {
-    const resp = await fetch('https://taotensorlaw.com/price_data.json');
-    if (!resp.ok) throw new Error('Failed to fetch price_data.json');
-    return await resp.json(); // [[timestamp_s, price], ...]
-}
-
-async function fetchBinanceDailyKlines(startMs) {
+async function fetchData() {
     try {
-        const url = `https://api.binance.com/api/v3/klines?symbol=TAOUSDT&interval=1d&startTime=${Math.floor(startMs)}&limit=1000`;
-        const resp = await fetch(url);
-        if (!resp.ok) return [];
-        const klines = await resp.json();
-        return klines.map(k => [k[0] / 1000, parseFloat(k[4])]); // [timestamp_s, close]
+        const resp = await fetch('/api/data');
+        if (!resp.ok) throw new Error('API error');
+        return await resp.json();
     } catch (e) {
-        console.error('Binance klines error:', e);
-        return [];
+        console.error('Fetch error:', e);
+        return null;
     }
 }
 
@@ -436,249 +334,31 @@ async function fetchLivePrice() {
     }
 }
 
-async function loadRawData() {
-    // price_data.json is already enriched server-side (historical + Binance appended)
-    // Just read it directly — no need to fetch Binance again
-    const raw = await fetchHistoricalData();
-    if (!raw || raw.length === 0) throw new Error('No historical data');
-    cachedRawData = raw;
-    return raw;
-}
-
-// ---- Power Law Math (ported from app.py) ----
-
-function linearRegressionLog10(data) {
-    // data: [{x: day+offset, y: price}, ...]
-    const valid = data.filter(p => p.x > 0 && p.y > 0);
-    const n = valid.length;
-    if (n < 2) return { slope: 0, intercept: 0 };
-
-    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-    for (const p of valid) {
-        const lx = Math.log10(p.x);
-        const ly = Math.log10(p.y);
-        sumX += lx;
-        sumY += ly;
-        sumXY += lx * ly;
-        sumX2 += lx * lx;
-    }
-
-    const denom = n * sumX2 - sumX * sumX;
-    if (denom === 0) return { slope: 0, intercept: 0 };
-
-    const slope = (n * sumXY - sumX * sumY) / denom;
-    const intercept = (sumY - slope * sumX) / n;
-    return { slope, intercept };
-}
-
-function calculateR2(data, slope, intercept) {
-    const valid = data.filter(p => p.x > 0 && p.y > 0);
-    if (valid.length < 2) return 0;
-
-    const yMean = valid.reduce((s, p) => s + Math.log10(p.y), 0) / valid.length;
-    let ssTot = 0, ssRes = 0;
-    for (const p of valid) {
-        const ly = Math.log10(p.y);
-        const lx = Math.log10(p.x);
-        const predicted = slope * lx + intercept;
-        ssTot += (ly - yMean) ** 2;
-        ssRes += (ly - predicted) ** 2;
-    }
-
-    if (ssTot === 0) return 1;
-    return Math.max(0, 1 - ssRes / ssTot);
-}
-
-function calculateResiduals(data, slope, intercept) {
-    const valid = data.filter(p => p.x > 0 && p.y > 0);
-    const residuals = [];
-    for (const p of valid) {
-        const lx = Math.log10(p.x);
-        const ly = Math.log10(p.y);
-        const predicted = slope * lx + intercept;
-        residuals.push(ly - predicted);
-    }
-    residuals.sort((a, b) => a - b);
-    return residuals;
-}
-
-function getPercentile(sortedResiduals, pct) {
-    if (!sortedResiduals.length) return 0;
-    const idx = (pct / 100) * (sortedResiduals.length - 1);
-    const lower = Math.floor(idx);
-    const upper = Math.ceil(idx);
-    if (lower === upper) return sortedResiduals[lower];
-    const weight = idx - lower;
-    return sortedResiduals[lower] * (1 - weight) + sortedResiduals[upper] * weight;
-}
-
-function computeModel(rawData, dayOffset) {
-    if (!rawData || rawData.length < 2) return null;
-
-    // Build base data: dayIndex starts at 1
-    const base = [];
-    for (let i = 0; i < rawData.length; i++) {
-        const ts = rawData[i][0];
-        const price = rawData[i][1];
-        if (price > 0) {
-            base.push({ time: ts * 1000, dayIndex: i + 1, y: price });
-        }
-    }
-    if (base.length < 2) return null;
-
-    // Apply offset
-    let priceData = base.map(p => ({ x: p.dayIndex + dayOffset, y: p.y }));
-    priceData = priceData.filter(p => p.x > 0);
-
-    const { slope, intercept } = linearRegressionLog10(priceData);
-    const r2 = calculateR2(priceData, slope, intercept);
-    const residuals = calculateResiduals(priceData, slope, intercept);
-
-    const p1 = getPercentile(residuals, 1);
-    const p20 = getPercentile(residuals, 20);
-    const p50 = getPercentile(residuals, 50);
-    const p80 = getPercentile(residuals, 80);
-    const p99 = getPercentile(residuals, 99);
-
-    // Current zone based on last data point
-    const last = base[base.length - 1];
-    const lastX = last.dayIndex + dayOffset;
-    let lastResidual = 0;
-    if (lastX > 0) {
-        const lastLogX = Math.log10(lastX);
-        const lastLogY = Math.log10(last.y);
-        const predicted = slope * lastLogX + intercept;
-        lastResidual = lastLogY - predicted;
-    }
-
-    let zone;
-    if (lastResidual > p80) zone = 'Bubble';
-    else if (lastResidual > p50) zone = 'Expensive';
-    else if (lastResidual > p20) zone = 'Value';
-    else zone = 'Discount';
-
-    // "Today" band levels
-    const startTs = base[0].time;
-    const msPerDay = 86400000;
-    const nowMs = Date.now();
-    const daysSinceStart = Math.round((nowMs - startTs) / msPerDay);
-    const todayIndex = base[0].dayIndex + daysSinceStart;
-    const todayLogX = (todayIndex + dayOffset) > 0 ? Math.log10(todayIndex + dayOffset) : 0;
-
-    const medianIntercept = intercept + p50;
-
-    function bandPrice(pctlIntercept) {
-        return 10 ** (slope * todayLogX + pctlIntercept);
-    }
-
-    const bands = {
-        bubble: [bandPrice(intercept + p80), bandPrice(intercept + p99)],
-        expensive: [bandPrice(intercept + p50), bandPrice(intercept + p80)],
-        value: [bandPrice(intercept + p20), bandPrice(intercept + p50)],
-        discount: [bandPrice(intercept + p1), bandPrice(intercept + p20)],
-    };
-
-    // Fair value projections
-    const firstDate = new Date(base[0].time);
-    const firstDayIndex = base[0].dayIndex;
-    const currentYear = new Date().getFullYear();
-
-    const targetDates = [
-        ['Today', new Date()],
-        [String(currentYear + 1), new Date(currentYear + 1, 0, 1)],
-        [String(currentYear + 2), new Date(currentYear + 2, 0, 1)],
-        [String(currentYear + 3), new Date(currentYear + 3, 0, 1)],
-    ];
-
-    const projections = [];
-    for (const [label, dt] of targetDates) {
-        const diffDays = Math.round((dt - firstDate) / msPerDay);
-        const targetDay = firstDayIndex + diffDays;
-        const dayForLog = targetDay + dayOffset;
-        if (dayForLog > 0) {
-            const projPrice = 10 ** (slope * Math.log10(dayForLog) + medianIntercept);
-            projections.push({ label, price: Math.round(projPrice * 100) / 100 });
-        } else {
-            projections.push({ label, price: null });
-        }
-    }
-
-    // Trend line data for chart (extend 365 days forward)
-    const lastDay = base[base.length - 1].dayIndex;
-    const futureDay = lastDay + 365;
-    const trendLine = [];
-    const firstX = base[0].dayIndex + dayOffset;
-    const lastXExtended = futureDay + dayOffset;
-    if (firstX > 0 && lastXExtended > firstX) {
-        const logMin = Math.log10(firstX);
-        const logMax = Math.log10(lastXExtended);
-        const steps = 200;
-        for (let i = 0; i <= steps; i++) {
-            const logX = logMin + (logMax - logMin) * i / steps;
-            const xVal = 10 ** logX;
-            const dayIdx = xVal - dayOffset;
-            const tsMs = base[0].time + (dayIdx - base[0].dayIndex) * msPerDay;
-            const yMedian = 10 ** (slope * logX + medianIntercept);
-            const yP1 = 10 ** (slope * logX + intercept + p1);
-            const yP99 = 10 ** (slope * logX + intercept + p99);
-            const yP20 = 10 ** (slope * logX + intercept + p20);
-            const yP80 = 10 ** (slope * logX + intercept + p80);
-            trendLine.push({
-                timestamp: tsMs / 1000,
-                median: Math.round(yMedian * 10000) / 10000,
-                p1: Math.round(yP1 * 10000) / 10000,
-                p99: Math.round(yP99 * 10000) / 10000,
-                p20: Math.round(yP20 * 10000) / 10000,
-                p80: Math.round(yP80 * 10000) / 10000,
-            });
-        }
-    }
-
-    const lastDate = new Date(base[base.length - 1].time);
-
-    return {
-        slope: Math.round(slope * 1e6) / 1e6,
-        intercept: Math.round(intercept * 1e6) / 1e6,
-        median_intercept: Math.round(medianIntercept * 1e6) / 1e6,
-        r2: Math.round(r2 * 1e6) / 1e6,
-        day_offset: dayOffset,
-        zone,
-        last_price: base[base.length - 1].y,
-        last_date: lastDate.toISOString(),
-        data_points: base.length,
-        bands,
-        projections,
-        price_history: base.map(p => [p.time / 1000, p.y]),
-        trend_line: trendLine,
-    };
-}
-
-// ---- UI Updates (identical to original dashboard.html) ----
-
 function updateLivePrice(price) {
     const el = document.getElementById('livePrice');
     if (price) {
-        el.textContent = '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        el.textContent = '$' + price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
         el.style.color = '#4ade80';
     }
 }
 
 function updateUI(data) {
-    if (!data) {
+    if (!data || data.error) {
         document.getElementById('dataStatus').textContent = 'Error loading data';
         document.getElementById('statusDot').className = 'dot dot-red';
         document.getElementById('loader').style.display = 'none';
         return;
     }
     modelData = data;
+    window.modelLastTs = data.last_ts || 0;
 
     // Status
     const lastDate = new Date(data.last_date);
-    document.getElementById('dataStatus').textContent = lastDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    document.getElementById('dataStatus').textContent = lastDate.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'});
     const diffMs = Date.now() - lastDate.getTime();
-    if (diffMs < 51 * 3600 * 1000) {
+    if (diffMs < 51*3600*1000) {
         document.getElementById('statusDot').className = 'dot dot-green';
-    } else if (diffMs < 7 * 86400 * 1000) {
+    } else if (diffMs < 7*86400*1000) {
         document.getElementById('statusDot').className = 'dot dot-yellow';
     } else {
         document.getElementById('statusDot').className = 'dot dot-red';
@@ -686,6 +366,7 @@ function updateUI(data) {
 
     // Prices
     document.getElementById('lastPrice').textContent = '$' + data.last_price.toFixed(2);
+    if (data.live_price) updateLivePrice(data.live_price);
 
     // Zone
     const zoneEl = document.getElementById('priceZone');
@@ -702,17 +383,17 @@ function updateUI(data) {
     // Projections
     const projEl = document.getElementById('projections');
     projEl.innerHTML = data.projections.map(p =>
-        `<div class="card-row"><span class="label">${p.label}</span><span class="value">$${p.price ? p.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'}</span></div>`
+        `<div class="card-row"><span class="label">${p.label}</span><span class="value">$${p.price ? p.price.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : 'N/A'}</span></div>`
     ).join('');
 
     // Bands
     const bands = data.bands;
     const bandEl = document.getElementById('bandLevels');
     const bandItems = [
-        { name: 'Bubble', color: '#f87171', range: bands.bubble },
-        { name: 'Expensive', color: '#facc15', range: bands.expensive },
-        { name: 'Value', color: '#4ade80', range: bands.value },
-        { name: 'Discount', color: '#60a5fa', range: bands.discount },
+        {name: 'Bubble', color: '#f87171', range: bands.bubble},
+        {name: 'Expensive', color: '#facc15', range: bands.expensive},
+        {name: 'Value', color: '#4ade80', range: bands.value},
+        {name: 'Discount', color: '#60a5fa', range: bands.discount},
     ];
     bandEl.innerHTML = bandItems.map(b =>
         `<div class="card-row">
@@ -728,25 +409,27 @@ function updateUI(data) {
 function buildChart(data) {
     const ctx = document.getElementById('powerLawChart').getContext('2d');
 
-    const pricePoints = data.price_history.map(p => ({ x: p[0] * 1000, y: p[1] }));
-    // Store last price timestamp globally for tooltip filter
-    lastPriceTimestamp = pricePoints.length > 0 ? pricePoints[pricePoints.length - 1].x : 0;
+    // Price data points: transform to {x: timestamp_ms, y: price}
+    const pricePoints = data.price_history.map(p => ({x: p[0] * 1000, y: p[1]}));
 
-    const medianLine = data.trend_line.map(p => ({ x: p.timestamp * 1000, y: p.median }));
-    const p1Line = data.trend_line.map(p => ({ x: p.timestamp * 1000, y: p.p1 }));
-    const p99Line = data.trend_line.map(p => ({ x: p.timestamp * 1000, y: p.p99 }));
-    const p20Line = data.trend_line.map(p => ({ x: p.timestamp * 1000, y: p.p20 }));
-    const p80Line = data.trend_line.map(p => ({ x: p.timestamp * 1000, y: p.p80 }));
+    // Trend lines
+    const medianLine = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.median}));
+    const p1Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p1}));
+    const p99Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p99}));
+    const p20Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p20}));
+    const p80Line = data.trend_line.map(p => ({x: p.timestamp * 1000, y: p.p80}));
 
     const showBands = document.getElementById('showBands').checked;
 
     const datasets = [
-        { label: '_p1_boundary', data: p1Line, borderColor: 'transparent', backgroundColor: 'transparent', fill: false, pointRadius: 0, borderWidth: 0, hidden: !showBands },
-        { label: '_discount_fill', data: p20Line, borderColor: 'transparent', backgroundColor: 'rgba(96,165,250,0.12)', fill: 0, pointRadius: 0, borderWidth: 0, hidden: !showBands },
-        { label: '_value_fill', data: medianLine, borderColor: 'transparent', backgroundColor: 'rgba(74,222,128,0.12)', fill: 1, pointRadius: 0, borderWidth: 0, hidden: !showBands },
-        { label: '_expensive_fill', data: p80Line, borderColor: 'transparent', backgroundColor: 'rgba(250,204,21,0.12)', fill: 2, pointRadius: 0, borderWidth: 0, hidden: !showBands },
-        { label: '_bubble_fill', data: p99Line, borderColor: 'transparent', backgroundColor: 'rgba(248,113,113,0.12)', fill: 3, pointRadius: 0, borderWidth: 0, hidden: !showBands },
+        // Band fills (hidden by default)
+        {label: '_p1_boundary', data: p1Line, borderColor: 'transparent', backgroundColor: 'transparent', fill: false, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_discount_fill', data: p20Line, borderColor: 'transparent', backgroundColor: 'rgba(96,165,250,0.12)', fill: 0, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_value_fill', data: medianLine, borderColor: 'transparent', backgroundColor: 'rgba(74,222,128,0.12)', fill: 1, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_expensive_fill', data: p80Line, borderColor: 'transparent', backgroundColor: 'rgba(250,204,21,0.12)', fill: 2, pointRadius: 0, borderWidth: 0, hidden: !showBands},
+        {label: '_bubble_fill', data: p99Line, borderColor: 'transparent', backgroundColor: 'rgba(248,113,113,0.12)', fill: 3, pointRadius: 0, borderWidth: 0, hidden: !showBands},
 
+        // Price line
         {
             label: 'Price',
             data: pricePoints,
@@ -759,6 +442,7 @@ function buildChart(data) {
             tension: 0.1,
             fill: false,
         },
+        // Median (fair value)
         {
             label: '50th Pctl (Fair Value)',
             data: medianLine,
@@ -768,6 +452,7 @@ function buildChart(data) {
             fill: false,
             borderDash: [],
         },
+        // P1
         {
             label: '1st Pctl',
             data: p1Line,
@@ -777,6 +462,7 @@ function buildChart(data) {
             fill: false,
             borderDash: [4, 4],
         },
+        // P99
         {
             label: '99th Pctl',
             data: p99Line,
@@ -786,6 +472,7 @@ function buildChart(data) {
             fill: false,
             borderDash: [4, 4],
         },
+        // P20
         {
             label: '20th Pctl',
             data: p20Line,
@@ -796,6 +483,7 @@ function buildChart(data) {
             borderDash: [4, 4],
             hidden: !showBands,
         },
+        // P80
         {
             label: '80th Pctl',
             data: p80Line,
@@ -837,28 +525,19 @@ function buildChart(data) {
                     displayColors: false,
                     filter: (item) => {
                         if (item.dataset.label.startsWith('_')) return false;
-                        // Hide Price line tooltip when hovering over future area
-                        if (item.dataset.label === 'Price' && lastPriceTimestamp > 0) {
-                            const xMs = item.parsed.x;
-                            if (xMs > lastPriceTimestamp + 7 * 86400000) return false;
-                        }
+                        const lastTs = (window.modelLastTs || 0) * 1000;
+                        const isFuture = item.parsed.x > lastTs;
+                        // Past: only show Price
+                        if (!isFuture && item.dataset.label !== 'Price') return false;
                         return true;
                     },
                     callbacks: {
                         title: (items) => {
-                            // Use Price dataset timestamp as source of truth
-                            const priceItem = items.find(i => i.dataset.label === 'Price') || items.find(i => !i.dataset.label.startsWith('_'));
-                            if (priceItem) {
-                                const d = new Date(priceItem.parsed.x);
-                                return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-                            }
-                            return '';
+                            if (!items.length) return '';
+                            const d = new Date(items[0].parsed.x);
+                            return d.toLocaleDateString(undefined, {year:'numeric', month:'long', day:'numeric'});
                         },
                         label: (ctx) => {
-                            if (ctx.dataset.label.startsWith('_')) return null;
-                            const isFuture = ctx.parsed.x > lastPriceTimestamp;
-                            // Past: only show Price
-                            if (!isFuture && ctx.dataset.label !== 'Price') return null;
                             if (ctx.parsed.y == null) return null;
                             return ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         }
@@ -878,7 +557,7 @@ function buildChart(data) {
                     ticks: {
                         color: '#64748b',
                         font: { family: "'Inter', sans-serif", size: 10 },
-                        callback: function (value) {
+                        callback: function(value) {
                             const logVal = Math.log10(value);
                             if (Math.abs(logVal - Math.round(logVal)) < 1e-9) {
                                 return '$' + value.toLocaleString();
@@ -887,7 +566,7 @@ function buildChart(data) {
                         }
                     },
                     grid: {
-                        color: function (ctx) {
+                        color: function(ctx) {
                             const val = ctx.tick.value;
                             if (val <= 0) return 'rgba(255,255,255,0.04)';
                             const logVal = Math.log10(val);
@@ -910,66 +589,44 @@ function buildChart(data) {
 function toggleBands() {
     if (!chart || !modelData) return;
     const show = document.getElementById('showBands').checked;
+    // Fills (0-4)
     for (let i = 0; i <= 4; i++) {
         chart.setDatasetVisibility(i, show);
     }
+    // P20/P80 lines (9, 10)
     chart.setDatasetVisibility(9, show);
     chart.setDatasetVisibility(10, show);
     chart.update();
 }
 
-function applyOffset() {
+function reloadWithOffset() {
     const offset = parseInt(document.getElementById('offsetInput').value);
-    if (isNaN(offset) || !cachedRawData) return;
+    if (isNaN(offset)) return;
     document.getElementById('loader').style.display = 'flex';
-    try {
-        const model = computeModel(cachedRawData, offset);
-        updateUI(model);
-    } catch (e) {
-        console.error('Offset recompute error:', e);
-        document.getElementById('loader').style.display = 'none';
-    }
+    fetch('/api/data?offset=' + offset)
+        .then(r => r.json())
+        .then(data => updateUI(data))
+        .catch(e => {
+            console.error(e);
+            document.getElementById('loader').style.display = 'none';
+        });
 }
 
-// ---- Initialization ----
-
 async function init() {
-    try {
-        const raw = await loadRawData();
-        const offset = parseInt(document.getElementById('offsetInput').value) || OFFSET_NAKAMOTO;
-        const model = computeModel(raw, offset);
+    const data = await fetchData();
+    updateUI(data);
 
-        // Fetch live price in parallel
-        const livePrice = await fetchLivePrice();
-        if (livePrice) updateLivePrice(livePrice);
-
-        updateUI(model);
-    } catch (e) {
-        console.error('Init error:', e);
-        document.getElementById('dataStatus').textContent = 'Error loading data';
-        document.getElementById('statusDot').className = 'dot dot-red';
-        document.getElementById('loader').style.display = 'none';
-    }
-
-    // Update live price every 15 minutes
+    // Update live price every 30 seconds
     setInterval(async () => {
         const p = await fetchLivePrice();
         if (p) updateLivePrice(p);
-    }, 900000);
+    }, 30000);
 
-    // Full refresh every 1 hour
+    // Full refresh every 5 minutes
     setInterval(async () => {
-        try {
-            const raw = await loadRawData();
-            const offset = parseInt(document.getElementById('offsetInput').value) || OFFSET_NAKAMOTO;
-            const model = computeModel(raw, offset);
-            const livePrice = await fetchLivePrice();
-            if (livePrice) updateLivePrice(livePrice);
-            updateUI(model);
-        } catch (e) {
-            console.error('Refresh error:', e);
-        }
-    }, 3600000);
+        const data = await fetchData();
+        if (data && !data.error) updateUI(data);
+    }, 300000);
 }
 
 init();
