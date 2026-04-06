@@ -91,6 +91,69 @@
         }
         #powerLawChart { width: 100% !important; height: 100% !important; }
 
+        /* Overlay panel buttons */
+        .chart-overlay-btns {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 6px;
+            z-index: 10;
+        }
+        .overlay-btn {
+            padding: 4px 10px;
+            background: rgba(30,41,59,0.85);
+            color: #94a3b8;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .overlay-btn:hover, .overlay-btn.active {
+            background: rgba(59,130,246,0.85);
+            color: white;
+            border-color: rgba(59,130,246,0.5);
+        }
+        /* Overlay panel */
+        .chart-overlay-panel {
+            position: absolute;
+            top: 50px;
+            right: 20px;
+            background: rgba(15,23,42,0.92);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 12px 14px;
+            min-width: 220px;
+            z-index: 20;
+            backdrop-filter: blur(8px);
+            display: none;
+        }
+        .chart-overlay-panel.visible { display: block; }
+        .chart-overlay-panel h4 {
+            color: #f1f5f9;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin: 0 0 8px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .chart-overlay-panel .card-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            gap: 12px;
+        }
+        .chart-overlay-panel .card-row:last-child { border-bottom: none; }
+        .chart-overlay-panel .label { color: #94a3b8; font-size: 0.75rem; }
+        .chart-overlay-panel .value { color: #f1f5f9; font-size: 0.75rem; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+        .chart-overlay-panel .band-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+
         .bottom-bar {
             display: flex;
             flex-wrap: wrap;
@@ -102,37 +165,6 @@
             border-top: 1px solid #1e2030;
             font-size: 0.8125rem;
         }
-
-        .cards-row {
-            display: flex;
-            gap: 16px;
-            padding: 0 24px 16px;
-            flex-wrap: wrap;
-        }
-        .card {
-            flex: 1;
-            min-width: 200px;
-            background: #161822;
-            border: 1px solid #1e2030;
-            border-radius: 12px;
-            padding: 16px;
-        }
-        .card h3 {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #64748b;
-            margin-bottom: 12px;
-            font-weight: 600;
-        }
-        .card-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 4px 0;
-            font-size: 0.8125rem;
-        }
-        .card-row .label { color: #94a3b8; }
-        .card-row .value { font-family: 'JetBrains Mono', monospace; font-weight: 500; color: #e2e8f0; }
 
         .band-label {
             display: inline-flex;
@@ -278,6 +310,24 @@
             <div class="loader-text">Initialising Model</div>
         </div>
         <canvas id="powerLawChart"></canvas>
+
+        <!-- Overlay toggle buttons -->
+        <div class="chart-overlay-btns">
+            <button class="overlay-btn" id="btnProjections" onclick="toggleOverlay('projections-panel', 'btnProjections')">Projections</button>
+            <button class="overlay-btn" id="btnBands" onclick="toggleOverlay('bands-panel', 'btnBands')">Bands</button>
+        </div>
+
+        <!-- Projections overlay -->
+        <div class="chart-overlay-panel" id="projections-panel">
+            <h4>Fair Value Projections</h4>
+            <div id="projections"></div>
+        </div>
+
+        <!-- Bands overlay -->
+        <div class="chart-overlay-panel" id="bands-panel" style="top: 50px; right: 130px;">
+            <h4>Valuation Bands (Today)</h4>
+            <div id="bandLevels"></div>
+        </div>
     </div>
 
     <div class="bottom-bar">
@@ -296,22 +346,25 @@
         </div>
     </div>
 
-    <div class="cards-row">
-        <div class="card">
-            <h3>Fair Value Projections</h3>
-            <div id="projections"></div>
-        </div>
-        <div class="card">
-            <h3>Valuation Bands (Today)</h3>
-            <div id="bandLevels"></div>
-        </div>
-    </div>
-
     <div class="refresh-note">Auto-refreshes every 5 minutes &middot; Data from taotensorlaw.com &middot; Price from Binance</div>
 
 <script>
 let chart = null;
 let modelData = null;
+
+function toggleOverlay(panelId, btnId) {
+    const panel = document.getElementById(panelId);
+    const btn = document.getElementById(btnId);
+    const isVisible = panel.classList.contains('visible');
+    // Close all panels first
+    document.querySelectorAll('.chart-overlay-panel').forEach(p => p.classList.remove('visible'));
+    document.querySelectorAll('.overlay-btn').forEach(b => b.classList.remove('active'));
+    // Toggle clicked
+    if (!isVisible) {
+        panel.classList.add('visible');
+        btn.classList.add('active');
+    }
+}
 
 async function fetchData() {
     try {
@@ -502,7 +555,7 @@ function buildChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { mode: 'x', intersect: false },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false },
             plugins: {
                 legend: {
                     labels: {
@@ -527,7 +580,6 @@ function buildChart(data) {
                         if (item.dataset.label.startsWith('_')) return false;
                         const lastTs = (window.modelLastTs || 0) * 1000;
                         const isFuture = item.parsed.x > lastTs;
-                        // Past: only show Price
                         if (!isFuture && item.dataset.label !== 'Price') return false;
                         return true;
                     },
