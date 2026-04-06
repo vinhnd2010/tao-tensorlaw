@@ -2,60 +2,37 @@
 """TAO Tensor Law Dashboard - Self-hosted on port 8086"""
 
 import json
-import math
 import os
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-import requests
 from flask import Flask, jsonify, render_template, request
+
+from lib.model import OFFSET_NAKAMOTO, sort_dedupe, gap_fill_and_update, compute_model
+from lib.fetcher import fetch_from_upstream, fetch_binance_price, fetch_binance_daily_klines
 
 app = Flask(__name__, template_folder="public")
 
 DATA_DIR = Path(__file__).parent
-CACHE_FILE = DATA_DIR / "price_data.json"  # self-hosted, append-only after bootstrap
+CACHE_FILE = DATA_DIR / "price_data.json"
 APPEND_INTERVAL = 3600  # append new Binance data every 1 hour
-
-OFFSET_NAKAMOTO = 486
 
 # In-memory timestamp of last Binance append (avoid hammering API)
 _last_append_time = 0
-
-
-def _sort_dedupe(data):
-    """Sort by timestamp, deduplicate by day bucket."""
-    data.sort(key=lambda x: x[0])
-    seen = set()
-    out = []
-    for point in data:
-        day_key = int(point[0] // 86400)
-        if day_key not in seen:
-            seen.add(day_key)
-            out.append(point)
-    return out
 
 
 def bootstrap_from_upstream():
     """One-time bootstrap: fetch full history from taotensorlaw.com.
     Only called when price_data.json does not exist yet."""
     print(f"[{datetime.now()}] Bootstrapping from taotensorlaw.com ...")
-    try:
-        resp = requests.get(
-            "https://taotensorlaw.com/price_data.json",
-            timeout=30,
-            headers={"User-Agent": "TAO-TensorLaw-Dashboard/1.0"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        data = _sort_dedupe(data)
+    data = fetch_from_upstream()
+    if data:
+        data = sort_dedupe(data)
         CACHE_FILE.write_text(json.dumps(data))
         print(f"[{datetime.now()}] Bootstrap done: {len(data)} points saved.")
-        return data
-    except Exception as e:
-        print(f"[{datetime.now()}] Bootstrap failed: {e}")
-        return []
+    return data
 
 
 def append_binance_data(data):
@@ -80,7 +57,7 @@ def append_binance_data(data):
                 data.append(k)
                 added += 1
         if added:
-            data = _sort_dedupe(data)
+            data = sort_dedupe(data)
             CACHE_FILE.write_text(json.dumps(data))
             print(f"[{datetime.now()}] Appended {added} new Binance points. Total: {len(data)}")
 
@@ -111,283 +88,6 @@ def build_enriched_data():
     return fetch_price_data()
 
 
-def fetch_binance_price():
-    """Get current TAO/USDT price from Binance public API."""
-    try:
-        resp = requests.get(
-            "https://api.binance.com/api/v3/ticker/price",
-            params={"symbol": "TAOUSDT"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return float(resp.json()["price"])
-    except Exception as e:
-        print(f"[{datetime.now()}] Binance API error: {e}")
-        return None
-
-
-def fetch_binance_daily_klines(start_ts_ms):
-    """Fetch daily klines from Binance to fill gap between cached data and now."""
-    try:
-        resp = requests.get(
-            "https://api.binance.com/api/v3/klines",
-            params={
-                "symbol": "TAOUSDT",
-                "interval": "1d",
-                "startTime": int(start_ts_ms),
-                "limit": 1000,
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        klines = resp.json()
-        # Each kline: [open_time, open, high, low, close, ...]
-        # Return as [[timestamp_seconds, close_price], ...]
-        result = []
-        for k in klines:
-            ts_s = k[0] / 1000  # open_time ms -> s
-            close = float(k[4])
-            result.append([ts_s, close])
-        return result
-    except Exception as e:
-        print(f"[{datetime.now()}] Binance klines error: {e}")
-        return []
-
-
-def linear_regression_log10(data):
-    """Log-log linear regression on (day_number, price) pairs.
-    data: list of dicts with 'x' (day+offset) and 'y' (price)
-    Returns slope, intercept in log10 space.
-    """
-    valid = [p for p in data if p["x"] > 0 and p["y"] > 0]
-    n = len(valid)
-    if n < 2:
-        return 0, 0
-
-    sum_x = sum_y = sum_xy = sum_x2 = 0
-    for p in valid:
-        lx = math.log10(p["x"])
-        ly = math.log10(p["y"])
-        sum_x += lx
-        sum_y += ly
-        sum_xy += lx * ly
-        sum_x2 += lx * lx
-
-    denom = n * sum_x2 - sum_x * sum_x
-    if denom == 0:
-        return 0, 0
-
-    slope = (n * sum_xy - sum_x * sum_y) / denom
-    intercept = (sum_y - slope * sum_x) / n
-    return slope, intercept
-
-
-def calculate_r_squared(data, slope, intercept):
-    """R² goodness of fit in log10 space."""
-    valid = [p for p in data if p["x"] > 0 and p["y"] > 0]
-    if len(valid) < 2:
-        return 0
-
-    y_mean = sum(math.log10(p["y"]) for p in valid) / len(valid)
-    ss_tot = ss_res = 0
-    for p in valid:
-        ly = math.log10(p["y"])
-        lx = math.log10(p["x"])
-        predicted = slope * lx + intercept
-        ss_tot += (ly - y_mean) ** 2
-        ss_res += (ly - predicted) ** 2
-
-    if ss_tot == 0:
-        return 1
-    return max(0, 1 - ss_res / ss_tot)
-
-
-def calculate_residuals(data, slope, intercept):
-    """Sorted residuals: log10(actual) - log10(predicted)."""
-    valid = [p for p in data if p["x"] > 0 and p["y"] > 0]
-    residuals = []
-    for p in valid:
-        lx = math.log10(p["x"])
-        ly = math.log10(p["y"])
-        predicted = slope * lx + intercept
-        residuals.append(ly - predicted)
-    residuals.sort()
-    return residuals
-
-
-def get_percentile(sorted_residuals, pct):
-    """Interpolated percentile from sorted array."""
-    if not sorted_residuals:
-        return 0
-    idx = (pct / 100) * (len(sorted_residuals) - 1)
-    lower = int(math.floor(idx))
-    upper = int(math.ceil(idx))
-    if lower == upper:
-        return sorted_residuals[lower]
-    weight = idx - lower
-    return sorted_residuals[lower] * (1 - weight) + sorted_residuals[upper] * weight
-
-
-def compute_model(raw_data, day_offset=OFFSET_NAKAMOTO):
-    """Run the full power law model on raw price data.
-    raw_data: [[timestamp_s, price], ...]
-    Returns dict with all model parameters.
-    """
-    if not raw_data or len(raw_data) < 2:
-        return None
-
-    # Build base data: day_index starts at 1
-    base = []
-    for i, point in enumerate(raw_data):
-        ts, price = point[0], point[1]
-        if price > 0:
-            base.append({"time": ts * 1000, "dayIndex": i + 1, "y": price})
-
-    if len(base) < 2:
-        return None
-
-    # Apply offset
-    price_data = [{"x": p["dayIndex"] + day_offset, "y": p["y"]} for p in base]
-    price_data = [p for p in price_data if p["x"] > 0]
-
-    slope, intercept = linear_regression_log10(price_data)
-    r2 = calculate_r_squared(price_data, slope, intercept)
-    residuals = calculate_residuals(price_data, slope, intercept)
-
-    p20 = get_percentile(residuals, 20)
-    p50 = get_percentile(residuals, 50)
-    p80 = get_percentile(residuals, 80)
-    p1 = get_percentile(residuals, 1)
-    p99 = get_percentile(residuals, 99)
-
-    # Current zone based on last data point
-    last = base[-1]
-    last_x = last["dayIndex"] + day_offset
-    if last_x > 0:
-        last_log_x = math.log10(last_x)
-        last_log_y = math.log10(last["y"])
-        predicted = slope * last_log_x + intercept
-        last_residual = last_log_y - predicted
-    else:
-        last_residual = 0
-
-    if last_residual > p80:
-        zone = "Bubble"
-    elif last_residual > p50:
-        zone = "Expensive"
-    elif last_residual > p20:
-        zone = "Value"
-    else:
-        zone = "Discount"
-
-    # "Today" band levels
-    start_ts = base[0]["time"]
-    ms_per_day = 86400000
-    now_ms = time.time() * 1000
-    days_since_start = round((now_ms - start_ts) / ms_per_day)
-    today_index = base[0]["dayIndex"] + days_since_start
-    today_log_x = math.log10(today_index + day_offset) if (today_index + day_offset) > 0 else 0
-
-    median_intercept = intercept + p50
-
-    def band_price(pctl_intercept):
-        return 10 ** (slope * today_log_x + pctl_intercept)
-
-    bands = {
-        "bubble": [band_price(intercept + p80), band_price(intercept + p99)],
-        "expensive": [band_price(intercept + p50), band_price(intercept + p80)],
-        "value": [band_price(intercept + p20), band_price(intercept + p50)],
-        "discount": [band_price(intercept + p1), band_price(intercept + p20)],
-    }
-
-    # Fair value projections
-    first_date = datetime.fromtimestamp(base[0]["time"] / 1000)
-    first_day_index = base[0]["dayIndex"]
-    current_year = datetime.now().year
-
-    projections = []
-    target_dates = [
-        ("Today", datetime.now()),
-        (str(current_year + 1), datetime(current_year + 1, 1, 1)),
-        (str(current_year + 2), datetime(current_year + 2, 1, 1)),
-        (str(current_year + 3), datetime(current_year + 3, 1, 1)),
-    ]
-    for label, dt in target_dates:
-        diff_days = (dt - first_date).days
-        target_day = first_day_index + diff_days
-        day_for_log = target_day + day_offset
-        if day_for_log > 0:
-            proj_price = 10 ** (slope * math.log10(day_for_log) + median_intercept)
-            projections.append({"label": label, "price": round(proj_price, 2)})
-        else:
-            projections.append({"label": label, "price": None})
-
-    # Trend line data for chart — aligned to price history timestamps + 365 days future
-    # Use same timestamps as price data so tooltip mode:'index' always shows all datasets
-    trend_line = []
-    last_day = base[-1]["dayIndex"]
-    last_ts_ms = base[-1]["time"]
-
-    # Build from actual price history points
-    for p in base:
-        day_idx = p["dayIndex"]
-        x_val = day_idx + day_offset
-        if x_val <= 0:
-            continue
-        log_x = math.log10(x_val)
-        y_median = 10 ** (slope * log_x + median_intercept)
-        y_p1 = 10 ** (slope * log_x + intercept + p1)
-        y_p99 = 10 ** (slope * log_x + intercept + p99)
-        y_p20 = 10 ** (slope * log_x + intercept + p20)
-        y_p80 = 10 ** (slope * log_x + intercept + p80)
-        trend_line.append({
-            "timestamp": p["time"] / 1000,
-            "median": round(y_median, 4),
-            "p1": round(y_p1, 4),
-            "p99": round(y_p99, 4),
-            "p20": round(y_p20, 4),
-            "p80": round(y_p80, 4),
-        })
-
-    # Extend 365 days into the future (monthly points)
-    for extra_days in range(30, 366, 30):
-        day_idx = last_day + extra_days
-        x_val = day_idx + day_offset
-        if x_val <= 0:
-            continue
-        log_x = math.log10(x_val)
-        ts_ms = last_ts_ms + extra_days * ms_per_day
-        y_median = 10 ** (slope * log_x + median_intercept)
-        y_p1 = 10 ** (slope * log_x + intercept + p1)
-        y_p99 = 10 ** (slope * log_x + intercept + p99)
-        y_p20 = 10 ** (slope * log_x + intercept + p20)
-        y_p80 = 10 ** (slope * log_x + intercept + p80)
-        trend_line.append({
-            "timestamp": ts_ms / 1000,
-            "median": round(y_median, 4),
-            "p1": round(y_p1, 4),
-            "p99": round(y_p99, 4),
-            "p20": round(y_p20, 4),
-            "p80": round(y_p80, 4),
-        })
-
-    return {
-        "slope": round(slope, 6),
-        "intercept": round(intercept, 6),
-        "median_intercept": round(median_intercept, 6),
-        "r2": round(r2, 6),
-        "day_offset": day_offset,
-        "zone": zone,
-        "last_price": base[-1]["y"],
-        "last_date": datetime.fromtimestamp(base[-1]["time"] / 1000).isoformat(),
-        "data_points": len(base),
-        "bands": bands,
-        "projections": projections,
-        "price_history": [[p["time"] / 1000, p["y"]] for p in base],
-        "trend_line": trend_line,
-    }
-
-
 def refresh_data_periodically():
     """Background thread: append new Binance data every hour."""
     while True:
@@ -409,10 +109,10 @@ def api_data():
     if not raw:
         return jsonify({"error": "No data available"}), 500
 
-    # Always update today's price with latest from Binance
+    # Update today's price with latest from Binance
     live_price = fetch_binance_price()
     if live_price:
-        raw[-1][1] = live_price
+        gap_fill_and_update(raw, live_price)
 
     # Support custom day offset via query param
     offset = request.args.get("offset", OFFSET_NAKAMOTO, type=int)
