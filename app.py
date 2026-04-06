@@ -409,6 +409,11 @@ def api_data():
     if not raw:
         return jsonify({"error": "No data available"}), 500
 
+    # Always update today's price with latest from Binance
+    live_price = fetch_binance_price()
+    if live_price:
+        raw[-1][1] = live_price
+
     # Support custom day offset via query param
     offset = request.args.get("offset", OFFSET_NAKAMOTO, type=int)
 
@@ -416,8 +421,6 @@ def api_data():
     if not model:
         return jsonify({"error": "Model computation failed"}), 500
 
-    # Add live price and last data timestamp for frontend to know cutoff
-    live_price = fetch_binance_price()
     model["live_price"] = live_price
     model["last_ts"] = raw[-1][0]  # unix seconds — frontend uses this as past/future cutoff
 

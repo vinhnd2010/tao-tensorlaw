@@ -323,13 +323,17 @@ def api_data():
                 if k[0] > last_ts + 43200:
                     raw.append(k)
 
+    # Always update today's price with latest from Binance
+    live_price = fetch_binance_price()
+    if live_price:
+        raw[-1][1] = live_price
+
     offset = request.args.get("offset", OFFSET_NAKAMOTO, type=int)
 
     model = compute_model(raw, day_offset=offset)
     if not model:
         return jsonify({"error": "Model computation failed"}), 500
 
-    live_price = fetch_binance_price()
     model["live_price"] = live_price
     model["last_ts"] = raw[-1][0]
 
