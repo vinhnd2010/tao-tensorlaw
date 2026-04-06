@@ -50,30 +50,30 @@ tao-tensorlaw/
 │ /price_data.json │       │  /api/v3/      │       │  /ticker/    │
 │ (bootstrap only) │       │  klines        │       │  price       │
 └────────┬─────────┘       └───────┬────────┘       └──────┬───────┘
-         │                         │ hourly append          │
-         │  one-time if            │ (background thread)    │
-         │  file missing           │                        │
-         ▼                         ▼                        │
-       ┌───────────────────────────────┐                    │
-       │      price_data.json          │                    │
-       │      (local, persisted)       │                    │
-       └──────────────┬────────────────┘                    │
-                      │                                     │
-             read + update today's                          │
-             price + compute model                          │
-                      │                                     │
-                      ▼                                     │
-              ┌────────────────┐                            │
-              │   /api/data    │                            │
-              │   (Flask)      │                            │
-              └───────┬────────┘                            │
-                      │ JSON response                       │
-                      ▼                                     ▼
-              ┌──────────────────────────────────────────────┐
-              │             public/index.html                │
-              │  - Renders chart (Chart.js)                  │
-              │  - Auto-refreshes every 5 min                │
-              │  - Live price updates every 30s              │
+         │                         │ hourly append         │
+         │  one-time if            │ (background thread)   │
+         │  file missing           │                       │
+         ▼                         ▼                       │
+       ┌───────────────────────────────┐                   │
+       │      price_data.json          │                   │
+       │      (local, persisted)       │                   │
+       └──────────────┬────────────────┘                   │
+                      │                                    │
+             read + update today's                         │
+             price + compute model                         │
+                      │                                    │
+                      ▼                                    │
+              ┌────────────────┐                           │
+              │   /api/data    │                           │
+              │   (Flask)      │                           │
+              └───────┬────────┘                           │
+                      │ JSON response                      │
+                      ▼                                    ▼
+              ┌─────────────────────────────────────────────┐
+              │             public/index.html               │
+              │  - Renders chart (Chart.js)                 │
+              │  - Auto-refreshes every 5 min               │
+              │  - Live price updates every 30s             │
               └─────────────────────────────────────────────┘
 ```
 
@@ -85,25 +85,25 @@ tao-tensorlaw/
 │ /price_data.json │       │  /api/v3/    │    │  /ticker/    │
 │  (per request)   │       │  klines      │    │  price       │
 └────────┬─────────┘       └──────┬───────┘    └──────┬───────┘
-         │                        │                    │
-         │                        │  ✗ blocked from    │  ✗ blocked from
-         │                        │    cloud IPs       │    cloud IPs
-         ▼                        │                    │
-┌─────────────────┐               │                    │
-│   /api/data     │               │                    │
-│ (Vercel fn)     │               │                    │
-│ model from      │               │                    │
-│ upstream only   │               │                    │
-└────────┬────────┘               │                    │
-         │ JSON (possibly stale)  │                    │
-         ▼                        ▼                    ▼
+         │                        │                   │
+         │                        │  ✗ blocked from   │  ✗ blocked from
+         │                        │    cloud IPs      │    cloud IPs
+         ▼                        │                   │
+┌─────────────────┐               │                   │
+│   /api/data     │               │                   │
+│ (Vercel fn)     │               │                   │
+│ model from      │               │                   │
+│ upstream only   │               │                   │
+└────────┬────────┘               │                   │
+         │ JSON (possibly stale)  │                   │
+         ▼                        ▼                   ▼
 ┌──────────────────────────────────────────────────────────┐
 │                   public/index.html                      │
 │  1. Receive model from /api/data                         │
 │  2. If data stale: fetch Binance klines (browser → OK)   │
-│  3. Append missing days to price_history                  │
-│  4. Fetch live price, update today's entry                │
-│  5. Render chart with complete data                       │
+│  3. Append missing days to price_history                 │
+│  4. Fetch live price, update today's entry               │
+│  5. Render chart with complete data                      │
 └──────────────────────────────────────────────────────────┘
 ```
 
