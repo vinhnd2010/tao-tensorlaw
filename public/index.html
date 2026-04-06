@@ -455,8 +455,20 @@ async function loadRawData() {
         }
     }
 
-    cachedRawData = raw;
-    return raw;
+    // Sort by timestamp and deduplicate by day bucket
+    raw.sort((a, b) => a[0] - b[0]);
+    const seen = new Set();
+    const deduped = [];
+    for (const p of raw) {
+        const dayKey = Math.floor(p[0] / 86400);
+        if (!seen.has(dayKey)) {
+            seen.add(dayKey);
+            deduped.push(p);
+        }
+    }
+
+    cachedRawData = deduped;
+    return deduped;
 }
 
 // ---- Power Law Math (ported from app.py) ----
