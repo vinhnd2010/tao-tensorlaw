@@ -828,7 +828,7 @@ function buildChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
+            interaction: { mode: 'x', intersect: false },
             plugins: {
                 legend: {
                     labels: {
@@ -860,19 +860,21 @@ function buildChart(data) {
                     },
                     callbacks: {
                         title: (items) => {
-                            if (items.length > 0) {
-                                // Prefer the x value from a trend/projection dataset if available
-                                // (more accurate for future dates)
-                                const trendItem = items.find(i => i.dataset.label !== 'Price');
-                                const xMs = trendItem ? trendItem.parsed.x : items[0].parsed.x;
-                                const d = new Date(xMs);
+                            // Use Price dataset timestamp as source of truth
+                            const priceItem = items.find(i => i.dataset.label === 'Price') || items.find(i => !i.dataset.label.startsWith('_'));
+                            if (priceItem) {
+                                const d = new Date(priceItem.parsed.x);
                                 return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
                             }
                             return '';
                         },
                         label: (ctx) => {
                             if (ctx.dataset.label.startsWith('_')) return null;
-                            return ctx.dataset.label + ': $' + ctx.parsed.y.toFixed(2);
+                            const isFuture = ctx.parsed.x > lastPriceTimestamp;
+                            // Past: only show Price
+                            if (!isFuture && ctx.dataset.label !== 'Price') return null;
+                            if (ctx.parsed.y == null) return null;
+                            return ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         }
                     }
                 }
