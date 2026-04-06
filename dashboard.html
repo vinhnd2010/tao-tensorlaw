@@ -350,6 +350,7 @@ function updateUI(data) {
         return;
     }
     modelData = data;
+    window.modelLastTs = data.last_ts || 0;
 
     // Status
     const lastDate = new Date(data.last_date);
@@ -533,7 +534,13 @@ function buildChart(data) {
                         },
                         label: (ctx) => {
                             if (ctx.dataset.label.startsWith('_')) return null;
-                            return ctx.dataset.label + ': $' + ctx.parsed.y.toFixed(2);
+                            const pointTs = ctx.parsed.x;  // ms
+                            const lastTs = (window.modelLastTs || 0) * 1000;  // convert s -> ms
+                            const isFuture = pointTs > lastTs;
+                            // Past: only show actual Price dataset
+                            if (!isFuture && ctx.dataset.label !== 'Price') return null;
+                            if (ctx.parsed.y == null) return null;
+                            return ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         }
                     }
                 }

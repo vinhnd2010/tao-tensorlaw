@@ -15,33 +15,82 @@ from flask import Flask, jsonify, render_template, request
 app = Flask(__name__, template_folder=".")
 
 DATA_DIR = Path(__file__).parent
-CACHE_FILE = DATA_DIR / "price_data.json"
-CACHE_MAX_AGE = 86400  # 24 hours
+CACHE_FILE = DATA_DIR / "price_data.json"        # self-hosted enriched data
+UPSTREAM_FILE = DATA_DIR / "price_data_upstream.json"  # raw from taotensorlaw.com
+CACHE_MAX_AGE = 86400  # 24 hours — re-enrich once per day
 
 OFFSET_NAKAMOTO = 486
 
 
+def _sort_dedupe(data):
+    """Sort by timestamp, deduplicate by day bucket."""
+    data.sort(key=lambda x: x[0])
+    seen = set()
+    out = []
+    for point in data:
+        day_key = int(point[0] // 86400)
+        if day_key not in seen:
+            seen.add(day_key)
+            out.append(point)
+    return out
+
+
+def _fetch_upstream():
+    """Fetch historical data from taotensorlaw.com and cache it."""
+    try:
+        resp = requests.get(
+            "https://taotensorlaw.com/price_data.json",
+            timeout=30,
+            headers={"User-Agent": "TAO-TensorLaw-Dashboard/1.0"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        UPSTREAM_FILE.write_text(json.dumps(data))
+        print(f"[{datetime.now()}] Fetched upstream price_data.json ({len(data)} points)")
+        return data
+    except Exception as e:
+        print(f"[{datetime.now()}] Failed to fetch upstream: {e}")
+        if UPSTREAM_FILE.exists():
+            return json.loads(UPSTREAM_FILE.read_text())
+        return []
+
+
+def build_enriched_data():
+    """Combine upstream historical data with latest Binance daily klines,
+    then save the enriched result to price_data.json (self-hosted)."""
+    base = _fetch_upstream()
+    if not base:
+        return []
+
+    base = _sort_dedupe(base)
+
+    # Append Binance klines from day after last upstream point up to today
+    last_ts = base[-1][0]
+    start_ms = (last_ts + 86400) * 1000
+    klines = fetch_binance_daily_klines(start_ms)
+    if klines:
+        for k in klines:
+            if k[0] > last_ts + 43200:  # at least 12h gap
+                base.append(k)
+        base = _sort_dedupe(base)
+
+    CACHE_FILE.write_text(json.dumps(base))
+    print(f"[{datetime.now()}] Saved enriched price_data.json ({len(base)} points)")
+    return base
+
+
 def fetch_price_data():
-    """Fetch price_data.json from taotensorlaw.com, cache locally."""
-    needs_fetch = True
+    """Return enriched price data, rebuilding from upstream+Binance if stale."""
+    needs_rebuild = True
     if CACHE_FILE.exists():
         age = time.time() - CACHE_FILE.stat().st_mtime
         if age < CACHE_MAX_AGE:
-            needs_fetch = False
+            needs_rebuild = False
 
-    if needs_fetch:
-        try:
-            resp = requests.get(
-                "https://taotensorlaw.com/price_data.json",
-                timeout=30,
-                headers={"User-Agent": "TAO-TensorLaw-Dashboard/1.0"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            CACHE_FILE.write_text(json.dumps(data))
-            print(f"[{datetime.now()}] Fetched fresh price_data.json ({len(data)} points)")
-        except Exception as e:
-            print(f"[{datetime.now()}] Failed to fetch price_data.json: {e}")
+    if needs_rebuild:
+        data = build_enriched_data()
+        if data:
+            return data
 
     if CACHE_FILE.exists():
         return json.loads(CACHE_FILE.read_text())
@@ -326,11 +375,11 @@ def compute_model(raw_data, day_offset=OFFSET_NAKAMOTO):
 
 
 def refresh_data_periodically():
-    """Background thread to refresh data every 24h."""
+    """Background thread: rebuild enriched data every 24h."""
     while True:
         time.sleep(CACHE_MAX_AGE)
         try:
-            fetch_price_data()
+            build_enriched_data()
         except Exception as e:
             print(f"Background refresh error: {e}")
 
@@ -346,32 +395,6 @@ def api_data():
     if not raw:
         return jsonify({"error": "No data available"}), 500
 
-    # Supplement with Binance daily klines to fill the gap
-    last_ts = raw[-1][0]  # seconds
-    now_ts = time.time()
-    gap_days = (now_ts - last_ts) / 86400
-
-    if gap_days > 1:
-        start_ms = (last_ts + 86400) * 1000  # next day
-        klines = fetch_binance_daily_klines(start_ms)
-        if klines:
-            # Avoid duplicates: only add klines with timestamp > last cached
-            for k in klines:
-                if k[0] > last_ts + 43200:  # at least 12h after last point
-                    raw.append(k)
-
-    # Sort by timestamp and deduplicate
-    raw.sort(key=lambda x: x[0])
-    seen = set()
-    deduped = []
-    for point in raw:
-        ts = point[0]
-        day_key = int(ts // 86400)  # bucket by day
-        if day_key not in seen:
-            seen.add(day_key)
-            deduped.append(point)
-    raw = deduped
-
     # Support custom day offset via query param
     offset = request.args.get("offset", OFFSET_NAKAMOTO, type=int)
 
@@ -379,11 +402,19 @@ def api_data():
     if not model:
         return jsonify({"error": "Model computation failed"}), 500
 
-    # Add live price
+    # Add live price and last data timestamp for frontend to know cutoff
     live_price = fetch_binance_price()
     model["live_price"] = live_price
+    model["last_ts"] = raw[-1][0]  # unix seconds — frontend uses this as past/future cutoff
 
     return jsonify(model)
+
+
+@app.route("/api/refresh", methods=["POST"])
+def api_refresh():
+    """Force rebuild enriched price_data.json from upstream + Binance."""
+    data = build_enriched_data()
+    return jsonify({"ok": True, "points": len(data)})
 
 
 if __name__ == "__main__":
@@ -391,8 +422,8 @@ if __name__ == "__main__":
     t = threading.Thread(target=refresh_data_periodically, daemon=True)
     t.start()
 
-    # Initial data fetch
-    fetch_price_data()
+    # Initial data build
+    build_enriched_data()
 
     print("Starting TAO Tensor Law Dashboard on http://localhost:8086")
     port = int(os.environ.get("PORT", 8086))
