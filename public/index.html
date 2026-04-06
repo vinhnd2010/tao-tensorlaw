@@ -387,6 +387,56 @@ async function fetchLivePrice() {
     }
 }
 
+async function fetchBinanceKlines(startMs) {
+    try {
+        const url = `https://api.binance.com/api/v3/klines?symbol=TAOUSDT&interval=1d&startTime=${Math.floor(startMs)}&limit=1000`;
+        const resp = await fetch(url);
+        if (!resp.ok) return [];
+        const klines = await resp.json();
+        return klines.map(k => [k[0] / 1000, parseFloat(k[4])]); // [timestamp_s, close]
+    } catch (e) {
+        return [];
+    }
+}
+
+async function gapFillFromBinance(data) {
+    if (!data || !data.price_history || !data.price_history.length) return;
+
+    const lastTs = data.price_history[data.price_history.length - 1][0];
+    const nowTs = Date.now() / 1000;
+    const lastDay = Math.floor(lastTs / 86400);
+    const today = Math.floor(nowTs / 86400);
+
+    if (today <= lastDay) return;
+
+    // Fetch missing klines from Binance (browser can reach Binance)
+    const startMs = (lastTs + 86400) * 1000;
+    const klines = await fetchBinanceKlines(startMs);
+    if (klines.length) {
+        for (const k of klines) {
+            if (k[0] > lastTs + 43200) {
+                data.price_history.push(k);
+            }
+        }
+    }
+
+    // Update today's entry with live price
+    const livePrice = await fetchLivePrice();
+    if (livePrice) {
+        const newLastTs = data.price_history[data.price_history.length - 1][0];
+        const newLastDay = Math.floor(newLastTs / 86400);
+        if (today === newLastDay) {
+            data.price_history[data.price_history.length - 1][1] = livePrice;
+        } else {
+            data.price_history.push([nowTs, livePrice]);
+        }
+        data.last_price = livePrice;
+        data.live_price = livePrice;
+        data.last_ts = data.price_history[data.price_history.length - 1][0];
+        updateLivePrice(livePrice);
+    }
+}
+
 function updateLivePrice(price) {
     const el = document.getElementById('livePrice');
     if (price) {
@@ -651,21 +701,26 @@ function toggleBands() {
     chart.update();
 }
 
-function reloadWithOffset() {
+async function reloadWithOffset() {
     const offset = parseInt(document.getElementById('offsetInput').value);
     if (isNaN(offset)) return;
     document.getElementById('loader').style.display = 'flex';
-    fetch('/api/data?offset=' + offset)
-        .then(r => r.json())
-        .then(data => updateUI(data))
-        .catch(e => {
-            console.error(e);
-            document.getElementById('loader').style.display = 'none';
-        });
+    try {
+        const resp = await fetch('/api/data?offset=' + offset);
+        const data = await resp.json();
+        if (data && !data.error) await gapFillFromBinance(data);
+        updateUI(data);
+    } catch (e) {
+        console.error(e);
+        document.getElementById('loader').style.display = 'none';
+    }
 }
 
 async function init() {
     const data = await fetchData();
+    if (data && !data.error) {
+        await gapFillFromBinance(data);
+    }
     updateUI(data);
 
     // Update live price every 30 seconds
@@ -677,7 +732,10 @@ async function init() {
     // Full refresh every 5 minutes
     setInterval(async () => {
         const data = await fetchData();
-        if (data && !data.error) updateUI(data);
+        if (data && !data.error) {
+            await gapFillFromBinance(data);
+        }
+        updateUI(data);
     }, 300000);
 }
 
