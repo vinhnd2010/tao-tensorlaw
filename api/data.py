@@ -4,16 +4,20 @@ Note: Binance API blocks cloud provider IPs (AWS/Vercel), so gap-filling
 and live price are handled client-side in the frontend instead.
 """
 
+import json
 import sys
 from pathlib import Path
 
 from flask import Flask, jsonify, request
 
 # Allow imports from project root (for lib/)
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from lib.model import OFFSET_NAKAMOTO, compute_model
 from lib.fetcher import fetch_from_upstream
+
+FALLBACK_FILE = PROJECT_ROOT / "price_data.json"
 
 app = Flask(__name__)
 
@@ -29,6 +33,8 @@ def add_cors_headers(response):
 @app.route("/api/data")
 def api_data():
     raw = fetch_from_upstream(timeout=5)
+    if not raw and FALLBACK_FILE.exists():
+        raw = json.loads(FALLBACK_FILE.read_text())
     if not raw:
         return jsonify({"error": "No data available"}), 500
 
