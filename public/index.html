@@ -435,6 +435,23 @@ async function gapFillFromBinance(data) {
         data.last_ts = data.price_history[data.price_history.length - 1][0];
         updateLivePrice(livePrice);
     }
+
+    // Update last_date and zone to reflect the latest data point (including Binance)
+    const finalTs = data.price_history[data.price_history.length - 1][0];
+    data.last_date = new Date(finalTs * 1000).toISOString();
+
+    const finalPrice = data.price_history[data.price_history.length - 1][1];
+    if (data.bands && finalPrice) {
+        if (finalPrice >= data.bands.bubble[0]) {
+            data.zone = "Bubble";
+        } else if (finalPrice >= data.bands.expensive[0]) {
+            data.zone = "Expensive";
+        } else if (finalPrice >= data.bands.value[0]) {
+            data.zone = "Value";
+        } else {
+            data.zone = "Discount";
+        }
+    }
 }
 
 function updateLivePrice(price) {
